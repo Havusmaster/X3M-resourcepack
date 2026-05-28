@@ -1,0 +1,8 @@
+{
+    "model": {
+        "type": "model",
+        "model": "item/my_gun"
+    },
+    "hand_animation_on_swap": true,
+    "oversized_in_gui": false
+}

@@ -1,53 +1,37 @@
-# Server jar
-*.jar
-
-# Logs
+# Server files (not tracked)
+banned-ips.json
+banned-players.json
+bukkit.yml
+commands.yml
+config/
+eula.txt
+help.yml
 logs/
-*.log
-
-# Libraries
 libraries/
-
-# Versions
+permissions.yml
+plugins/
+server-errors.ps1
+server.properties
+spigot.yml
+start.bat
+usercache.json
+version_history.json
 versions/
+whitelist.json
+ops.json
 
-# Cache
-cache/
-*.cache
-*.json
-
-# Plugin jars (keep plugin configs, ignore jars)
-plugins/**/*.jar
-plugins/.paper-remapped/
-
-# Temp files
-temp/
-*.tmp
-
-# OS files
-Thumbs.db
-.DS_Store
-desktop.ini
-
-# Secrets
-secrets.secret
-rcon-password.txt
-
-# World folders (tracked via backups/ only)
+# World folders
 super flat/
 super flat_nether/
 super flat_the_end/
 
-# Dynamic plugin data
-plugins/Citizens/saves.yml
-plugins/Denizen/player_flags/
-plugins/Vault/balances.yml
-plugins/spark/
+# Server jars
+*.jar
+cache/
 
-# Keep backups (tracked by git)
-backups/
-!backups/.gitkeep
+# OS files
+Thumbs.db
+.DS_Store
 
-# Session locks
-*.lock
-session.lock
+# Secrets
+secrets.secret
