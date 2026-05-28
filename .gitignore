@@ -1,0 +1,53 @@
+# Server jar
+*.jar
+
+# Logs
+logs/
+*.log
+
+# Libraries
+libraries/
+
+# Versions
+versions/
+
+# Cache
+cache/
+*.cache
+*.json
+
+# Plugin jars (keep plugin configs, ignore jars)
+plugins/**/*.jar
+plugins/.paper-remapped/
+
+# Temp files
+temp/
+*.tmp
+
+# OS files
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Secrets
+secrets.secret
+rcon-password.txt
+
+# World folders (tracked via backups/ only)
+super flat/
+super flat_nether/
+super flat_the_end/
+
+# Dynamic plugin data
+plugins/Citizens/saves.yml
+plugins/Denizen/player_flags/
+plugins/Vault/balances.yml
+plugins/spark/
+
+# Keep backups (tracked by git)
+backups/
+!backups/.gitkeep
+
+# Session locks
+*.lock
+session.lock
