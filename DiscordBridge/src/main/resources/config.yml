@@ -1,0 +1,13 @@
+# Discord Bot Token (https://discord.com/developers/applications)
+bot-token: "YOUR_BOT_TOKEN"
+
+# Channel ID for chat synchronization
+chat-channel-id: "1506295560427012286"
+
+# Bot user ID (to ignore own messages)
+bot-user-id: "1506292700784365748"
+
+# Message formats
+format:
+  minecraft-to-discord: "**%s**: %s"
+  discord-to-minecraft: "<gray>[Discord] <aqua>%s: <white>%s"

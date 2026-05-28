@@ -1,0 +1,6 @@
+name: ${name}
+version: ${version}
+main: com.discordbridge.DiscordBridge
+api-version: ${apiVersion}
+description: Discord-Minecraft bridge plugin replacing Denizen scripts
+author: DiscordBridge
