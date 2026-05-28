@@ -7,75 +7,102 @@ param(
 $Cfg = @{
     WorldNames     = @("super flat", "super flat_nether", "super flat_the_end")
     BackupDir      = Join-Path $ServerPath "backups"
-    RconHost       = "127.0.0.1"
-    RconPort       = 25575
+    PingHost       = "127.0.0.1"
+    PingPort       = 25565
     EmptyWaitHours = 1
     KeepBackups    = 2
     CheckInterval  = 60
     MskTz          = "Russian Standard Time"
 }
 
-# ===== RCON CLIENT =====
-function Send-RconCommand {
-    param([string]$Password, [string]$Command)
-    $tcp = $null; $stream = $null; $writer = $null; $reader = $null
+# ===== SERVER LIST PING =====
+function Write-VarInt {
+    param([System.IO.Stream]$Stream, [int]$Value)
+    $v = [uint32]$Value
+    do {
+        $b = $v -band 0x7F
+        $v = $v -shr 7
+        if ($v -ne 0) { $b = $b -bor 0x80 }
+        $Stream.WriteByte([byte]$b)
+    } while ($v -ne 0)
+}
+
+function Read-VarInt {
+    param([System.IO.Stream]$Stream)
+    $result = 0; $shift = 0
+    do {
+        $b = $Stream.ReadByte()
+        if ($b -eq -1) { return $null }
+        $result = $result -bor (([uint32]($b -band 0x7F)) -shl $shift)
+        $shift += 7
+        if ($shift -gt 35) { return $null }
+    } while (($b -band 0x80) -ne 0)
+    return [int]$result
+}
+
+function Get-PlayerCount {
+    $tcp = $null; $stream = $null
     try {
         $tcp = [System.Net.Sockets.TcpClient]::new()
-        $tcp.Connect($Cfg.RconHost, $Cfg.RconPort)
-        $tcp.ReceiveTimeout = 5000
-        $tcp.SendTimeout = 5000
+        $tcp.Connect($Cfg.PingHost, $Cfg.PingPort)
+        $tcp.ReceiveTimeout = 4000
+        $tcp.SendTimeout = 4000
         $stream = $tcp.GetStream()
-        $writer = [System.IO.BinaryWriter]::new($stream)
 
-        $loginId = 1
-        $loginPayload = [Text.Encoding]::UTF8.GetBytes($Password + "`0")
-        $writer.Write([int32](4 + 4 + $loginPayload.Length)) # len
-        $writer.Write([int32]$loginId)                        # req id
-        $writer.Write([int32]3)                                # type: login
-        $writer.Write($loginPayload)                           # payload + null
-        $writer.Flush()
+        # Handshake (0x00): proto(-1) + addr + port + next(1)
+        $hsPayload = New-Object byte[] 0
+        $hsPayload = $hsPayload + [byte]0x00
+        $hsPayload = $hsPayload + [byte]0xFF,0xFF,0xFF,0xFF,0x0F
+        $addrBytes = [Text.Encoding]::UTF8.GetBytes("localhost")
+        $addrLen = [uint32]$addrBytes.Length
+        $hsStream = [System.IO.MemoryStream]::new()
+        Write-VarInt -Stream $hsStream -Value $addrLen
+        $hsStream.Write($addrBytes, 0, $addrBytes.Length)
+        $hsStream.Write([BitConverter]::GetBytes([uint16]$Cfg.PingPort), 0, 2)
+        Write-VarInt -Stream $hsStream -Value 1
+        $hsExtra = $hsStream.ToArray(); $hsStream.Dispose()
+        $hsPayload = $hsPayload + $hsExtra
 
-        $respId = Read-RconResponse $stream
-        if ($respId -ne $loginId) { return $null }
+        $fullPacket = New-Object byte[] 0
+        $lenStream = [System.IO.MemoryStream]::new()
+        Write-VarInt -Stream $lenStream -Value ($hsPayload.Length)
+        $fullPacket = $lenStream.ToArray() + $hsPayload; $lenStream.Dispose()
 
-        $cmdId = 2
-        $cmdPayload = [Text.Encoding]::UTF8.GetBytes($Command + "`0")
-        $writer.Write([int32](4 + 4 + $cmdPayload.Length))
-        $writer.Write([int32]$cmdId)
-        $writer.Write([int32]2)
-        $writer.Write($cmdPayload)
-        $writer.Flush()
+        $stream.Write($fullPacket, 0, $fullPacket.Length)
 
-        return Read-RconResponse $stream -isCommand $true
+        # Status request (0x00)
+        $stream.WriteByte(0x01)
+        $stream.WriteByte(0x00)
+
+        # Read response: varint(len), varint(id), varint(strlen), string
+        $pkLen = Read-VarInt $stream
+        if (-not $pkLen) { return $null }
+        $pkId = Read-VarInt $stream
+        if (-not $pkId) { return $null }
+        $strLen = Read-VarInt $stream
+        if (-not $strLen) { return $null }
+        if ($strLen -gt 32768) { return $null }
+
+        $strBytes = New-Object byte[] $strLen
+        $read = 0
+        while ($read -lt $strLen) {
+            $n = $stream.Read($strBytes, $read, $strLen - $read)
+            if ($n -le 0) { return $null }
+            $read += $n
+        }
+
+        $json = [Text.Encoding]::UTF8.GetString($strBytes)
+        $obj = $json | ConvertFrom-Json
+        if ($obj -and $obj.players) {
+            return [int]$obj.players.online
+        }
+        return $null
     } catch {
         return $null
     } finally {
-        if ($writer) { $writer.Dispose() }
-        if ($reader) { $reader.Dispose() }
         if ($stream) { $stream.Dispose() }
         if ($tcp) { $tcp.Dispose() }
     }
-}
-
-function Read-RconResponse {
-    param([System.Net.Sockets.NetworkStream]$Stream, [switch]$IsCommand)
-    $reader = [System.IO.BinaryReader]::new($Stream)
-    try {
-        $len = $reader.ReadInt32()
-        if ($len -lt 8) { return $null }
-        $reqId = $reader.ReadInt32()
-        $type  = $reader.ReadInt32()
-        $payloadLen = $len - 8
-        $payloadBytes = $reader.ReadBytes($payloadLen)
-        $nullTerminator = $payloadBytes.IndexOf([byte]0)
-        $text = if ($nullTerminator -ge 0) {
-            [Text.Encoding]::UTF8.GetString($payloadBytes, 0, $nullTerminator)
-        } else {
-            [Text.Encoding]::UTF8.GetString($payloadBytes)
-        }
-        return @{ RequestId = $reqId; Type = $type; Text = $text }
-    } catch { return $null }
-    finally { if ($reader) { $reader.Dispose() } }
 }
 
 # ===== HELPERS =====
@@ -87,41 +114,6 @@ function Get-MskTime {
     } catch {
         return $utc.AddHours(3)
     }
-}
-
-function Get-RconPass {
-    $props = Get-Content (Join-Path $ServerPath "server.properties") -Encoding UTF8
-    foreach ($line in $props) {
-        if ($line -match '^rcon\.password=(.+)') { return $matches[1] }
-    }
-    return $null
-}
-
-function Get-PlayerCount {
-    $pass = Get-RconPass
-    if (-not $pass) { return $null }
-    $resp = Send-RconCommand -Password $pass -Command "list"
-    if (-not $resp -or -not $resp.Text) { return $null }
-    if ($resp.Text -match 'There are (\d+) of a max') {
-        return [int]$matches[1]
-    }
-    return $null
-}
-
-function Invoke-SaveAll {
-    $pass = Get-RconPass
-    if (-not $pass) { return }
-    Send-RconCommand -Password $pass -Command "save-all" | Out-Null
-    Start-Sleep -Seconds 5
-    Send-RconCommand -Password $pass -Command "save-all" | Out-Null
-    Start-Sleep -Seconds 10
-}
-
-function Send-Broadcast {
-    param([string]$Message)
-    $pass = Get-RconPass
-    if (-not $pass) { return }
-    Send-RconCommand -Password $pass -Command "say $Message" | Out-Null
 }
 
 function New-Backup {
@@ -198,14 +190,6 @@ function Ensure-GitSetup {
         git -C $ServerPath config user.email "server-backup@minecraft.local"
         git -C $ServerPath config user.name "Minecraft Backup Bot"
 
-        Write-Host ""
-        Write-Host "=== GITHUB SETUP REQUIRED ===" -ForegroundColor Yellow
-        Write-Host "Run these commands to connect to GitHub:" -ForegroundColor Yellow
-        Write-Host "  cd `"$ServerPath`"" -ForegroundColor White
-        Write-Host "  git remote add origin https://github.com/YOUR_USER/YOUR_REPO.git" -ForegroundColor White
-        Write-Host "==============================" -ForegroundColor Yellow
-        Write-Host ""
-
         $remote = git -C $ServerPath remote get-url origin 2>$null
         if (-not $remote) {
             Write-Host "WARNING: No git remote configured. Backups will be local only." -ForegroundColor Red
@@ -214,61 +198,57 @@ function Ensure-GitSetup {
     }
 }
 
-# ===== MAIN LOOP =====
+function Start-Backup {
+    param([string]$Timestamp, [string]$Label)
+    Write-Host "  Date: $Timestamp"
+    Write-Host "  Label: $Label"
+    Write-Host "  Copying worlds..." -ForegroundColor Cyan
+    $ok = New-Backup -Timestamp $Timestamp
+    if ($ok) {
+        Write-Host "  Git commit & push..." -ForegroundColor Cyan
+        $msg = "backup: $Timestamp ($Label)"
+        Invoke-GitCommit -Timestamp $Timestamp -Message $msg
+        Remove-OldBackups
+        Remove-OldGitTags
+        Write-Host "  DONE" -ForegroundColor Green
+    } else {
+        Write-Host "  FAILED" -ForegroundColor Red
+    }
+}
+
+# ===== MAIN =====
 Ensure-GitSetup
 
-Write-Host "=== Minecraft Auto-Backup Monitor ===" -ForegroundColor Cyan
+Write-Host "=== Minecraft Auto-Backup ===" -ForegroundColor Cyan
 Write-Host "Server: $ServerPath"
-Write-Host "RCON:   $($Cfg.RconHost):$($Cfg.RconPort)"
+Write-Host "Ping:   $($Cfg.PingHost):$($Cfg.PingPort)"
 Write-Host "MSK TZ: $($Cfg.MskTz)"
 Write-Host "Backup: $($Cfg.BackupDir)"
 Write-Host "Keep:   $($Cfg.KeepBackups) backups"
 Write-Host "Check:  every $($Cfg.CheckInterval)s"
 Write-Host ""
 
-$state = "idle"
-$emptySince = $null
-
-function Start-BackupNow {
-    param([string]$Timestamp)
-    Send-Broadcast "&6[Backup] &eНачинается сохранение мира..."
-    Write-Host "  Saving world..." -ForegroundColor Cyan
-    Invoke-SaveAll
-    Write-Host "  Copying worlds..." -ForegroundColor Cyan
-    $ok = New-Backup -Timestamp $Timestamp
-    if ($ok) {
-        Write-Host "  Git commit & push..." -ForegroundColor Cyan
-        Invoke-GitCommit -Timestamp $Timestamp -Message "backup: $Timestamp (auto)"
-        Remove-OldBackups
-        Remove-OldGitTags
-        Send-Broadcast "&6[Backup] &aМир сохранён и отправлен в GitHub!"
-        Write-Host "  DONE" -ForegroundColor Green
-    } else {
-        Send-Broadcast "&6[Backup] &cОшибка при сохранении мира!"
-        Write-Host "  FAILED" -ForegroundColor Red
-    }
-}
-
+# === FORCED BACKUP (from Denizen /backup command) ===
 if ($Now) {
     Write-Host "=== FORCED BACKUP ===" -ForegroundColor Cyan
     $ts = (Get-MskTime).ToString("yyyy-MM-dd_HH-mm-ss")
-    Start-BackupNow -Timestamp $ts
+    Start-Backup -Timestamp $ts -Label "manual"
     Write-Host "=== BACKUP DONE ===" -ForegroundColor Cyan
     exit 0
 }
 
+# === AUTO BACKUP LOOP ===
+$state = "idle"
+$emptySince = $null
+
 while ($true) {
     $mskNow = Get-MskTime
-
-    $online = $null
-    try { $online = Get-PlayerCount } catch {}
+    $online = Get-PlayerCount
 
     if ($online -eq $null -and $state -ne "idle") {
         Write-Host "Server offline, resetting state" -ForegroundColor Yellow
-        $state = "idle"
-        $emptySince = $null
-        Start-Sleep -Seconds $Cfg.CheckInterval
-        continue
+        $state = "idle"; $emptySince = $null
+        Start-Sleep -Seconds $Cfg.CheckInterval; continue
     }
 
     switch ($state) {
@@ -281,12 +261,10 @@ while ($true) {
                 }
                 if ($online -gt 0) {
                     Write-Host "$($mskNow.ToString('HH:mm:ss')) MSK: $online players online, waiting..." -ForegroundColor Yellow
-                    Send-Broadcast "&6[Backup] &e00:00 MSK - ожидание выхода игроков для бэкапа..."
                     $state = "waiting_empty"
                 } else {
                     Write-Host "$($mskNow.ToString('HH:mm:ss')) MSK: Server empty, cooldown..." -ForegroundColor Green
-                    $emptySince = Get-Date
-                    $state = "cooldown"
+                    $emptySince = Get-Date; $state = "cooldown"
                 }
             }
         }
@@ -297,8 +275,7 @@ while ($true) {
             }
             if ($online -eq 0) {
                 Write-Host "  Server empty, cooldown..." -ForegroundColor Green
-                $emptySince = Get-Date
-                $state = "cooldown"
+                $emptySince = Get-Date; $state = "cooldown"
             } else {
                 Write-Host "  $online players online, waiting..." -ForegroundColor Yellow
             }
@@ -310,7 +287,6 @@ while ($true) {
             }
             if ($online -gt 0) {
                 Write-Host "  Player joined, resetting timer" -ForegroundColor Yellow
-                Send-Broadcast "&6[Backup] &eИгрок зашёл - таймер бэкапа сброшен"
                 $emptySince = $null; $state = "waiting_empty"
                 Start-Sleep -Seconds 57; continue
             }
@@ -318,13 +294,13 @@ while ($true) {
             $elapsed = ((Get-Date) - $emptySince).TotalHours
             Write-Host "  Cooldown: $([math]::Round($elapsed,1))/${waitHours}h"
             if ($elapsed -ge $waitHours) {
-                Write-Host ""; Write-Host "=== STARTING BACKUP ===" -ForegroundColor Cyan
+                Write-Host ""; Write-Host "=== AUTO BACKUP ===" -ForegroundColor Cyan
                 $state = "backing_up"
             }
         }
         "backing_up" {
             $ts = $mskNow.ToString("yyyy-MM-dd_HH-mm-ss")
-            Start-BackupNow -Timestamp $ts
+            Start-Backup -Timestamp $ts -Label "auto"
             $state = "idle"; $emptySince = $null
             Write-Host "=== BACKUP DONE ===`n" -ForegroundColor Cyan
         }

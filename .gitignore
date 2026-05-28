@@ -9,7 +9,14 @@ help.yml
 logs/
 libraries/
 permissions.yml
-plugins/
+plugins/*
+!plugins/Denizen/
+plugins/Denizen/**
+!plugins/Denizen/scripts/
+plugins/Denizen/scripts/**
+!plugins/Denizen/scripts/mechanise/
+plugins/Denizen/scripts/mechanise/**
+!plugins/Denizen/scripts/mechanise/backup_command.dsc
 server-errors.ps1
 server.properties
 spigot.yml
