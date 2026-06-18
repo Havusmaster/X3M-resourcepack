@@ -1,6 +1,8 @@
 {
   "pack": {
-    "pack_format": 48,
+    "pack_format": 75,
+    "min_format": 75,
+    "max_format": 75,
     "description": "§6Гефест Сервер §7- §fПрефиксы + Кастомные предметы"
   }
 }
