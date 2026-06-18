@@ -5,45 +5,35 @@
       "file": "minecraft:font/admin.png",
       "ascent": 8,
       "height": 8,
-      "chars": [
-        "恋"
-      ]
+      "chars": ["\uE000"]
     },
     {
       "type": "bitmap",
       "file": "minecraft:font/moder.png",
       "ascent": 8,
       "height": 8,
-      "chars": [
-        "性"
-      ]
+      "chars": ["\uE001"]
     },
     {
       "type": "bitmap",
       "file": "minecraft:font/tex-admin.png",
       "ascent": 8,
       "height": 8,
-      "chars": [
-        "同"
-      ]
+      "chars": ["\uE002"]
     },
     {
       "type": "bitmap",
       "file": "minecraft:font/x3unity.png",
       "ascent": 8,
       "height": 8,
-      "chars": [
-        "伊"
-      ]
+      "chars": ["\uE003"]
     },
     {
       "type": "bitmap",
       "file": "minecraft:font/logo.png",
       "ascent": 8,
       "height": 8,
-      "chars": [
-        "瓜"
-      ]
+      "chars": ["\uE004"]
     }
   ]
 }
